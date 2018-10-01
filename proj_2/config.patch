@@ -1,0 +1,33 @@
+--- Kconfig_ori.iosched	2018-05-06 02:06:17.112701000 -0700
++++ Kconfig.iosched	2018-05-06 02:02:21.345473367 -0700
+@@ -39,6 +39,12 @@
+ 	---help---
+ 	  Enable group IO scheduling in CFQ.
+ 
++config IOSCHED_SSTF
++    	tristate "SSTF"
++   	 default y
++    	---help---
++           The SSTF I/O scheduler
++
+ choice
+ 	prompt "Default I/O scheduler"
+ 	default DEFAULT_CFQ
+@@ -55,6 +61,9 @@
+ 	config DEFAULT_NOOP
+ 		bool "No-op"
+ 
++	config DEFAULT_SSTF
++		 bool "SSTF" if IOSCHED_SSTF=y
++
+ endchoice
+ 
+ config DEFAULT_IOSCHED
+@@ -62,6 +71,7 @@
+ 	default "deadline" if DEFAULT_DEADLINE
+ 	default "cfq" if DEFAULT_CFQ
+ 	default "noop" if DEFAULT_NOOP
++	default "sstf" if DEFAULT_SSTF
+ 
+ endmenu
+ 

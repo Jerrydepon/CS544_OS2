@@ -1,0 +1,36 @@
+\contentsline {section}{\numberline {1}Introduction}{3}
+\contentsline {section}{\numberline {2}Background of VMCS}{3}
+\contentsline {subsection}{\numberline {2.1}Overview}{3}
+\contentsline {subsection}{\numberline {2.2}Region of VMCS}{3}
+\contentsline {subsection}{\numberline {2.3}Data of VMCS}{4}
+\contentsline {subsection}{\numberline {2.4}Guest-state and Host-state Area}{4}
+\contentsline {subsection}{\numberline {2.5}VM Control Fields}{5}
+\contentsline {subsubsection}{\numberline {2.5.1}VM-execution Control Fields}{5}
+\contentsline {subsubsection}{\numberline {2.5.2}VM-exit Control Fields}{5}
+\contentsline {subsubsection}{\numberline {2.5.3}VM-entry Control Fields}{6}
+\contentsline {subsubsection}{\numberline {2.5.4}VM-exit Information Fields}{6}
+\contentsline {subsubsection}{\numberline {2.5.5}VM-instruction Error Fields}{6}
+\contentsline {section}{\numberline {3}Background knowledge for designing}{7}
+\contentsline {subsection}{\numberline {3.1}Kconfig}{7}
+\contentsline {subsection}{\numberline {3.2}Kobject}{7}
+\contentsline {subsubsection}{\numberline {3.2.1}Control and manage Kobject}{8}
+\contentsline {subsubsection}{\numberline {3.2.2}Reference Counts}{8}
+\contentsline {subsubsection}{\numberline {3.2.3}Kref}{8}
+\contentsline {subsection}{\numberline {3.3}Kset}{8}
+\contentsline {subsection}{\numberline {3.4}Ktype}{9}
+\contentsline {subsection}{\numberline {3.5}Sysfs}{10}
+\contentsline {subsubsection}{\numberline {3.5.1}Directories in Sysfs}{10}
+\contentsline {subsubsection}{\numberline {3.5.2}Directory and Devices}{10}
+\contentsline {subsubsection}{\numberline {3.5.3}Changing the sda hard drive I/O scheduler with SysFS}{11}
+\contentsline {subsubsection}{\numberline {3.5.4}Disabling selinux with SysFS}{11}
+\contentsline {section}{\numberline {4}Implement sysfs to vmcs}{11}
+\contentsline {subsection}{\numberline {4.1}Makefile}{12}
+\contentsline {subsection}{\numberline {4.2}Kconfig}{12}
+\contentsline {subsection}{\numberline {4.3}vmx.c}{12}
+\contentsline {subsection}{\numberline {4.4}vmcs-sysfs.c \& and vmcs-sysfs.h}{12}
+\contentsline {section}{\numberline {5}Setting up the environment}{12}
+\contentsline {subsection}{\numberline {5.1}Install CentOS 7 64-bit}{12}
+\contentsline {subsection}{\numberline {5.2}Install 4.1.5 Linux kernel}{13}
+\contentsline {section}{\numberline {6}Conclusion}{14}
+\contentsline {section}{\numberline {7}Patch File}{14}
+\contentsline {section}{References}{28}

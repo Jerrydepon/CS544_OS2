@@ -1,0 +1,48 @@
+\documentclass[english,10pt,letterpaper,onecolumn]{IEEEtran} 
+\usepackage[margin=.75in]{geometry}
+\usepackage{graphicx}
+\usepackage[utf8]{inputenc} 
+\usepackage[noadjust]{cite}
+\usepackage{babel}  
+\usepackage{titling}
+\usepackage{listings}
+\usepackage{url}
+
+% TITLE
+\title{Concurrency 1}
+\author{
+  Chih-Hsiang Wang
+}
+\date{April 14th, 2018}
+
+\begin{document}
+\begin{titlepage} 
+\maketitle
+\begin{center}
+CS544\\
+Operating Systems II\\
+(Spring 2018)
+\vspace{50 mm}
+\end{center}
+
+% ABSTRACT
+\begin{abstract}
+Implementing a solution to the producer-consumer problem and answering the questions about concurrency.
+\end{abstract}
+\end{titlepage}
+
+% Begin of the text
+\clearpage
+\subsection*{\bf 1. What do you think the main point of this assignment is?}
+The main point of this assignment is to understand how to implement threads in Linux by C language. By using the concept of mutex to lock and unlock the process, multiple processes can work concurrently. It is the first practice for us to get familiar with the basic of concurrency.
+
+\subsection*{\bf 2. How did you personally approach the problem? Design decisions, algorithm, etc.}
+First, I took the on-line course on Udacity to learn the vocabularies and knowledge about concurrency. I also learned how to use pthread by the example of the course. Based on the materials, I used pthread to create mutex and utilize conditional signal to connect between threads. Each thread will wait for the signal in certain condition such as the limitation of buffer size. 
+
+\subsection*{\bf 3. How did you ensure your solution was correct? Testing details, for instance.}
+By printing out the messages when producers and customers have action, I can make sure which thread is under processing. Further more, printing the total number of item in the buffer clearly tells me if the concurrency is correct. At first, I only create one producer and one customer, however, the behavior of them seems to be too regular that they take turn to take action. So I create more producers and customers to better observing the power of concurrency. The result is satisfying that producers and customers work in a way like what we have in the real world. Besides, the working rule on limitation of buffer size is functional.
+
+\subsection*{\bf 4. What did you learn?}
+I learned how to use C language to create mutex for concurrency in Linux. Besides, I got familiar with two methods for random number which are rdrand x86 ASM and Mersenne Twister. Using the package from others is the basic concept in computer science that we can make bigger project.
+
+\end{document}

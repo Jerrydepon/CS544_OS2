@@ -1,0 +1,411 @@
+\documentclass[10pt,draftclsnofoot,journal,compsoc,onecolumn]{IEEEtran}
+
+\usepackage[margin=0.75in]{geometry}
+\usepackage{graphicx}
+\usepackage{enumerate}
+\usepackage{amssymb}
+\usepackage{listings}
+\usepackage{titling}
+\usepackage{xcolor}
+\usepackage{indentfirst}
+
+% Style of Code
+\definecolor{mGreen}{rgb}{0,0.6,0}
+\definecolor{mGray}{rgb}{0.5,0.5,0.5}
+\definecolor{mPurple}{rgb}{0.58,0,0.82}
+\definecolor{backgroundColour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{CStyle}{  
+    commentstyle=\color{mGreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{mGray},
+    stringstyle=\color{mPurple},
+    basicstyle=\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2,
+    language=C
+}
+
+% TITLE
+\title{Grad Project: Implementing a sysfs interface to the VMCS}
+\author{
+  Chao-Ting Wen \hspace{.5cm}
+  \and
+  Chih-Hsiang Wang \hspace{.5cm}
+  \and
+  .Suwadi
+}
+\date{May 25th, 2018}
+
+\begin{document}
+\begin{titlepage} 
+\maketitle
+\begin{center}
+CS544\\
+Operating Systems II\\
+(Spring 2018)
+\vspace{50 mm}
+\end{center}
+
+% Abstract
+\begin{abstract}
+	Researching the contents of the VMCS. The document includes all fields, what they are used for, what they control and how to access them from the kernel. This document also includes the design for the patch.
+\end{abstract}
+\end{titlepage}
+
+% Table of Content
+\tableofcontents
+
+% Begin of the text
+\clearpage
+\section{Introduction}
+	\par VMCS stands for virtual machine control structure and is used to manage and track the virtual CPU in the VMX/KVM layer of the kernel. In the project, Sysfs, a virtual file-system which can be used for bidirectional communication with the kernel, will be integrated with VMCS to make it easy to access VMCS data in user-space. 
+    \par This paper will first make a brief introduction to VMCS based on the research to make the following progress easier. Then, the modified patch is designed to implement the VMCS Sysfs interface. The modified code will also be included in this part. Once the research and design stages are finished, we will illustrate how to install the two systems, CentOS 7 64-bit and 4.1.5 linux kernel, into the Minnowboard step by step. Finally, the test result and the conclusion will be given to sum up the project. 
+	
+\section{Background of VMCS}
+\subsection{Overview}
+	\par VMCS is a data structure in memory that exists exactly once per VM while it is managed by the VMM. VMCS is defined for VMX(Virtual Machine Extensions) operation that it manages transitions in and out of VMX non-root operation and processor behavior in VMX non-root operation. The main purpose of VMX operation is to support virtualization in the system. There are four instructions being used to access the VMCS from the kernel, which are VMCLEAR, VMPTRLD, VMREAD, and VMWRITE. VMCS region is a region in memory with a logical processor associating with each VMCS a 4KB region. To access the VMCS by instructions, VMCS pointer is utilized. VMCS pointer is a 64-bit physical address referenced with a VMCS in VMCS region and every VMCS pointer is 4KB-aligned. To be noticed, the VMCS pointer should not set bits beyond the processors physical address width. 
+	\par There may be any number of active VMCSs in a logical processor while there can only be one current VMCS at most. Executing VMPTLRD with the address of the VMCS can active the VMCS while VMCLEAR with the address of the VMCS can inactive it. If the VMCS is inactive, it's status will disappear from the logical processor. VMCS region is undefined if executing VMXOFF when VMCS is active, so the situation should be avoided by the software. By executing VMPTLRD with the address of the VMCS, the VMCS can be made current with the address loaded into the current VMCS pointer. There are some VMX instructions to operate on the current VMCS, which are VMLAUNCH, VMPTRST, VMREAD, VMRESUME, and VMWRITE. The detailed of the instructions will not be illustrated in the paper.
+
+\subsection{Region of VMCS}
+	\par In order to make sure the proper behavior of VMX operation, the VMCS region and the related structures should be maintained by the software.  The total size of a VMCS region is 4KB. There are three major contents with 12 bytes in total in the format of VMCS, which are VMCS revision identifier, VMX-abort indicator, and VMCS data (implementation-specific format).
+    \par The first 4 bytes is for VMCS revision identifier that different formats of VMCS data in the processors come with different VMCS revision identifiers. The function of VMCS revision identifier is to avoid the wrong usage of processors with different format. By reading the VMX capability MSR VMX\_BASIC, the software can get the VMCS revision identifier used by specific processor. Every time before using the region of a VMCS, it is necessary to write the VMCS revision identifier to the VMCS region by the software.
+    \par The next 4 bytes are responsible for the VMX-abort indicator. The VMX-abort indicator is used when a VMX abort happens. If the value of bytes in the VMX-abort indicator is not zero, it means there is a VMX abort and the software will write into the field.
+    \par The last 4 bytes are for the use of data of VMCS which is in charge of the the VMX non-root operation and the VMX transitions. The format of VMCS data is implementation-specific that it will be discussed later.
+
+\subsection{Data of VMCS}
+The data of VMCS can be categorized into six logical groups:
+\begin{itemize}
+  \item Guest-state area. It is used to store the state of processor into the area on VM exits and load the state from the area on VM entries.  
+  \item Host-state area. It is the area on VM exits where process state is loaded from.
+  \item VM-execution control fields. The fields can control processor behavior in VMX non-root operation and are related to VM exists.
+  \item VM-exit control fields. It is for the control of VM exists.
+  \item VM-entry control fields. It is for the control of VM entries.
+  \item VM-exit information fields. The fields are read-only for describing the cause of VM exists after receiving information on VM exists.
+\end{itemize}
+
+\subsection{Guest-state and Host-state Area}
+	\par There are fields in the guest-state area and host-state area of the VMCS. These fields are used for loading processor state on VM entry and storing into the fields on VM exit. Some fields in the guest-state area correspond to processor registers while some are not. In the contrast, all fields in the host-state area correspond to processor registers.
+    \par The following fields are in guest register state:
+\begin{itemize}
+  \item Control registers CR0, CR3, and CR4 (64 bits each).
+  \item Debug register DR7 (64 bits).
+  \item RSP, RIP, and RFLAGS (64 bits each).
+  \item Registers CS, SS, DS, ES, FS, GS, LDTR, and TR. \\
+  --- Selector (16 bits). \\
+  --- Base address (64 bits). \\ 
+  --- Segment limit (32 bits). \\
+  --- Access rights (32 bits).
+  \item Registers GDTR and IDTR. \\
+  --- Base address (64 bits).
+  --- Limit (32 bits).
+  \item MSRs IA32\_DEBUGCTL (64 bits), IA32\_SYSENTER\_CS (32 bits), IA32\_SYSENTER\_ESP (64 bits), and IA32\_SYSENTER\_EIP (64 bits).
+  
+\end{itemize}
+    \par The following fields are in guest non-register state:
+\begin{itemize}
+  \item Activity state (32 bits). When a logical processor is executing instructions normally, the field is in active state. There are four active states as following: \\
+  --- 0: Active. The logical processor is executing instructions normally. \\
+  --- 1: HLT. The logical processor is inactive. \\
+  --- 2: Shutdown. The logical processor is inactive because it incurred a triple fault3 or some other serious error. \\
+  --- 3: Wait-for-SIPI. The logical processor is inactive because it is waiting for a startup- IPI (SIPI).
+  \item Interruptibility state (32 bits). The field contains information to block some events for a certain period.
+  \item Pending debug exceptions (64 bits). The field contains information to recognize one or more debug exceptions without immediately delivering them.
+  \item VMCS link pointer (64 bits). The field is used for future expansion that it should be set to FFFFFFFF\_FFFFFFFFH to avoid VM-entry failures.
+\end{itemize}
+    \par The following fields are in host register state:
+\begin{itemize}
+  \item CR0, CR3, and CR4 (64 bits each).
+  \item RSP and RIP (64 bits each).
+  \item Selector fields (16 bits each) for the segment registers CS, SS, DS, ES, FS, GS, and TR.
+  \item Base-address fields (64 bits each) for FS, GS, TR, GDTR, and IDTR.
+  \item MSRs IA32\_SYSENTER\_CS (32 bits), IA32\_SYSENTER\_ESP (64 bits), and IA32\_SYSENTER\_EIP (64 bits).
+\end{itemize}
+    
+\subsection{VM Control Fields}
+	\par The fields of VM can be roughly categorized into five groups based on the different functions. These fields will be briefly explained in the following sections.
+\subsubsection{VM-execution Control Fields}
+	\par The VM-execution control fields govern VMX non-root operation. There are two types of VM-execution control fields, pin-based VM-execution controls and processor-based VM-execution controls. While the pin-based VM-execution controls govern the handling of asynchronous events (interrupts), the processor-based VM-execution controls govern the handling of synchronous events.
+	\par If the activate I/O bitmaps control is 1, a logical processor uses bitmaps A and B which are 64-bit physical addresses in the VM-execution control fields. These bitmaps are used for the execution of a VM exit while any bit in the I/O bitmaps matching to a port is 1. If the RDTSC exiting control is 0 and the use TSC offsetting control is 1, the 64-bit TSC-offset field in VM-execution control fields controls the executions of the RDTSC instruction.
+    \par VM-execution control fields include guest/host masks and read shadows for the CR0 and CR4 registers. Generally, bits are set to 1 to indicate bits owned by the host while set to 0 to indicate bits owned by the guest. Guest attempts to modify bits and guest reads return the the values from corresponding read shadow. VM-execution control fields also include a set of 4 64-bit CR3 target values and a 32-bit CR3 target count. Besides, CR8 register is included to access the task-priority register of the logical processor’s local APIC.
+
+\subsubsection{VM-exit Control Fields}
+	\par The VM-exit control fields govern the behavior of VM exits. There are two VM-exit controls used currently. Bit 9, host address-space size, is the control determines whether a logical processor is in 64-bit mode after the next VM exit. Bit 15, acknowledge interrupt on exit, is the control affects VM exits because of external interrupts.  
+    \par While VMM may specify lists of MSRs to be stored and loaded on VM exits, there are four VM-exit control fields for the storing and loading. 
+\begin{itemize}
+  \item VM-exit MSR-store count (32 bits).
+  \item VM-exit MSR-store address (64 bits).
+  \item VM-exit MSR-load count (32 bits). 
+  \item VM-exit MSR-load address (64 bits).
+\end{itemize}
+
+\subsubsection{VM-entry Control Fields}
+	\par The VM-entry control fields govern the behavior of VM entries. There is one VM-entry control, bit 9, IA-32e mode guest, used currently. The bit determines whether the logical processor is in IA-32e mode after VM entry.
+    \par While VMM may specify a list of MSRs to be loaded on VM entries, there are two VM-entry control fields for the function.
+\begin{itemize}
+  \item VM-entry MSR-load count (32 bits).
+  \item VM-entry MSR-load address (64 bits).
+\end{itemize}
+    \par There are three VM-entry control fields as following to deal with event injection. 
+\begin{itemize}
+  \item VM-entry interruption-information field (32 bits).
+  \item VM-entry exception error code (32 bits). 
+  \item VM-entry instruction length (32 bits).
+\end{itemize}
+    
+\subsubsection{VM-exit Information Fields}
+	\par The VMCS contains a section of read-only fields that contain information about the most recent VM exit. Attempts to write to these fields with VMWRITE fail. The following fields provide the information while a VM exit happens. Different fields may be produced by different reasons, users can look up the manual to find out the mapped information.
+\begin{itemize}
+  \item Exit reason (32 bits).
+  \item Exit qualification (64 bits).
+  \item VM-exit interruption information (32 bits).
+  \item VM-exit interruption error code (32 bits).
+  \item IDT-vectoring information (32 bits)
+  \item IDT-vectoring error code (32 bits).
+  \item VM-exit instruction length (32 bits).
+  \item Guest linear address (64 bits).
+  \item VMX-instruction information (32 bits).
+\end{itemize}
+    
+\subsubsection{VM-instruction Error Fields}
+Instead of providing information about the exit of VM, the VM-instruction error fields provide the information about any error encountered by a non-faulting execution of one of the VMX instructions.
+
+\section{Design for the patch}
+\par In order to show the data to SYSFS, the structure should use kernel object(Kobject). The structure of the Kobject should be created and point to the VMCS due to the fact that VMCS doesn’t have its own kobject. Before the structure is created, the kernel config should be enable/disable.
+
+\subsection{Kconfig}
+\par The Kconfig should be added some content in order to enable and disable the VMCS sysfs. The content should be added with the follow.
+
+\begin{itemize}
+\item Config VMCS SYSFS
+\item tristate “Enable\_VMCS\_SYSFS”
+\item depends on KVM \&\& TRACEPOINTS
+\end{itemize}
+
+\subsection{Kobject}
+\par A Kobject is an object of type struct Kobject.  Kobjects have a name and a reference count. It also has a parent pointer, a specific type, and usually, a representation in the sysfs virtual filesystem.
+Kobjects are generally not interesting on their own; instead, they are usually embedded within some other structure.
+No structure should EVER have more than one Kobject embedded within it.
+If it has more than Kobject embedded within it, the reference counting for the object will be messed up and incorrect.
+The code below is the structure of Kobject.
+
+\begin{lstlisting}[numbers=left]
+#define KOBJ_NAME_LEN   20
+
+struct kobject {
+        char                    *k_name;
+        char                    name[KOBJ_NAME_LEN];
+        struct kref             kref;
+        struct list_head        entry;
+        struct kobject          *parent;
+        struct kset             *kset;
+        struct kobj_type        *ktype;
+        struct dentry           *dentry;
+};
+
+\end{lstlisting}
+
+Every \textit{struct Kobject} has a name.
+\begin{itemize}
+
+\item The name is \textit{kobj$\,\to\,$k\_name}, and this pointer points either to the internal array or to an external string obtained from \textit{kmalloc()} and to be \textit{kfree()} when the kobject dies.
+
+\item A \textit{struct kref} is an object that handles reference counting.
+
+\item The \textit{entry} field is either empty or part of the circularly linked list containing members of the kset.
+
+\item The parent pointer points to this Kobject’s parent that Kobjects build an object hierarchy in the kernel and
+enable the expression of the relationship between multiple objects. 
+
+\item \textit{kset} is associated with a Kobject, then the parent for the Kobject can be set to NULL in the call to \textit{Kobject\_add()} and then the Kobject's parent will be the kset itself.
+
+
+\end{itemize}
+
+As we mention before, \textit{Kobject} are usually embedded within some other structure.
+
+\subsubsection{Control and manage Kobject}
+\par First, a \textit{struct Kobject} must be initialized by using this function \textit{Kobject\_init()}. Most fields are not touched by \textit{Kobject\_init()}. Before calling \textit{Kobject\_init()}, Kobject should memset to zero and assign kset. Which does the \textit{kref\_init} that sets the refcount to 1, initializes the entry field to an empty circular list, and does \textit{kobj$\,\to\,$kset = kset\_get(kobj$\,\to\,$kset)};
+which does not change \textit{kobj$\,\to\,$kset} but increments its refcount.\\
+
+
+\subsubsection{Reference Counts}
+To serve as a reference counter for the object in which it is embedded is one of the key functions of a Kobject. Once references to the object exist, the object and the code must continue to exist. The routines \textit{kobject\_get()} and \textit{kobject\_put()} do get/put on the \textit{kref} field. When the reference count drops to zero, a \textit{kobject\_cleanup()} is done.
+
+When a reference is released, the call to \textit{kobject\_put()} will decrement the
+reference count and possibly and free the object. Note that \textit{kobject\_init()}
+sets the reference count to one, so the code which sets up the kobject will
+need to do a \textit{kobject\_put()} eventually to release that reference.
+
+
+
+\subsubsection{Kref}
+A \textit{struct kref} is just an \textit{atomic\_t}. Still, it is a useful abstraction.
+The struct kref defined as the following below and the avaliable methods \textit{struct kref *k} and \textit{ void (*release)(struct kref *k))}:
+
+\begin{lstlisting}
+struct kref {
+        atomic_t refcount;
+};
+\end{lstlisting}
+
+
+The \textit{struct kref} had a release field, with this appropriate release function that it could be a parameter of kref\_put() to save memory.
+
+\begin{lstlisting}
+
+void kref_init(k)               k->refcount = 1;
+void kref_get(k)                k->refcount++;
+void kref_put(k,release)        if (!--k->refcount) release(k);
+
+\end{lstlisting}
+The \textit{kref get()} function gets the reference of kref which is declared in linux/kref.h. The reference count increased by calling this function but it do not return value. The \textit{kref put()} decrease the reference of kref. If the count is down to zero, then the \textit{release()} function should be called.
+
+\subsection{Kset}
+
+\par The Kset is a special Kobject which means that it will show up in "sys" file system. It usually used to union the similar Kobject. The property of these Kobject can be the same or not.
+
+\begin{itemize}
+
+\item The \textit{list/list\_lock} is to store all the link lists of the Kobject
+
+\item \textit{Kobject} is the Kset's own kobject
+
+\item \textit{uevent\_ops} is operating function set of Kset. When any Kobject need to use uevent, it must call uevent\_ops under its own Kset. Which means that if a Kobject didn't belong to any Kset, the uevent is not allow to be sent.
+
+\end{itemize}
+\begin{lstlisting}[numbers=left]
+ /* include/linux/kobject.h, line 159 */
+  struct kset {
+      struct list_head list;
+      spinlock_t list_lock;
+      struct kobject kobj;
+      const struct kset_uevent_ops *uevent_ops;
+  };
+\end{lstlisting}
+
+\subsection{Ktype}
+Ktype reprsent the different of Kobject type. Every Kobject will have its' own Ktype or the kernel will run error. Ktype(kernel object type) is a special type which relate to Kobject. Ktype is represented by struct kobj type, it defined in linux/kobject.h. Kobj type data structure contains three fields:A release method for releasing resources that kobject occupied; A sysfs ops pointer point to the sysfs operating table; A default list of attributes of sysfs file system. Sysfs operating table includes two functions store () and show (). When a user reads the state property, show () function is called, the function encoding specified property values are stored in the buffer and returned to the user mode. The store () function is used tostore property values that come from user mode.The detail structure is below:
+
+\begin{lstlisting}[numbers=left]
+struct kobj type {
+void (* release )( struct kobject * ) ;
+const struct sysfs ops * sysfs ops;
+struct attribute ** default attrs ;
+} ;
+\end{lstlisting}
+
+\begin{lstlisting}[numbers=left]
+struct kobj_type {
+        void (*release)(struct kobject *);
+        struct sysfs_ops        * sysfs_ops;
+        struct attribute        ** default_attrs;
+};
+\end{lstlisting}
+
+\begin{lstlisting}[numbers=left]
+static struct kobj_type vmcsctl_kobj_ktype = {
+		release = vmcsctl_release ,
+		sysfs_ops = & kobj_sysfs_ops ,
+};
+\end{lstlisting}
+
+Here is the detail introduce of the element in kobj type:
+\begin{itemize}
+\item Release pointer point to the deconstructor that called when the kobject reference count reach zero. This function is responsible for free memory and other clean up.
+\item Sysfs ops variable points to a sysfs ops structure. This structure describe the behavior of sysfs files on read and write.
+\item Default attrs points to a attribute structure array. This structs define the default attribute of this kobject. attribute describe the feature of the given object. If this kobject export to sysfs, this attribute will be export as a relative file. The last element in the array must ne NULL. Ktype is for describe the behavior of a group of kobject, instead of each kobject define its own behavior, the normal kobject behavior defined in ktype structure once, then all the similar kobject can sharing this same feature.
+\end{itemize}
+
+\subsection{Sysfs}
+\par SysFS is a ram-based virtual file system. It is the name for all of the files which are under /sys/. So it means files on that file system do not exist on the disk or any other physical media, rather than the representations of configurable kernel variables and the state of certain kernel data structures. SysFS provide a function to export kernel data structures, attributes, and then linkages which between them with userspace. Sysfs file system is a special file system which is similar to proc file system. It was used for organizing the device in the system into a hierarchy and providing particular information of kernel data structures for user-mode programs. For instance, on most systems the file /sys/block/sda/queue/scheduler has a list of available I/O schedulers for the system’s hard drive. The current I/O scheduler can be changed by writing the name of one of the schedulers to the file.
+
+\subsubsection{Directories in Sysfs}
+\begin{itemize}
+\item Block directory: contains all block devices.
+\item Devices directory: Contains all of the device of system, and organized into a hierarchy according to the type of device attached bus.
+\item Bus directory: Contains all system bus types
+\item Drivers directory: Includes all registered kernel device driver
+\item Class directory: system device type.
+\item Kernel directory: kernel include the kernel configuration option and state information.
+\end{itemize}
+
+\subsubsection{Directory and Devices}
+\begin{itemize}
+\item Add and delete kobject from sysfs: Only initialize the kobject cannot export into sysfs. If want to export kobject to sysfs. We need function kobject add(). In general, one or both of parent and kset should be set appropriately before kobject add() is called. The help function kobject create and add() combines the work of kobject create() and kobject add() into one function.
+\item Add file into sysfs: Kobjects map to directories, and the complete object hierarchy maps to the complete sysfs structure. Sysfs is a tree without file to provide actual data. Here we have some controls for attributes.
+\item Default attributes: the default files class is provide through the field of kobject and kset. Therefore, all the kobject that have same types have same default file class under the corresponding sysfs directory. kobj type include a field, which is default attrs, it is an attribute structure array. This attribute responsible map the kernel data into a file that in sysfs.
+\item Create new attribute: In special situation, some kobject instance need to have its own attribute. Therefore, kernel provide a function sysfs create file() interface to create new attribute.
+\item Remove new attribute: Removing a attribute need the function sysfs remove file().
+\item
+\end{itemize}
+
+\subsubsection{Changing the sda hard drive I/O scheduler with SysFS}
+\begin{lstlisting}[numbers=left]
+$ cat / sys/ block / sda/ queue / scheduler
+noop deadline [ cfq]
+$ echo noop > / sys/ block / sda/ queue / scheduler
+$ cat / sys/ block / sda/ queue / scheduler
+[ noop ] deadline cfq
+
+\end{lstlisting}
+
+\par Another functionality which can be changed with SysFS is selinux. selinux is a kernel module which adds additional access control policies to Linux to help secure the kernel. selinux can be easily disabled by writing a 0 to /sys/fs/selinux/enforce, and reenabled by writing a 1.
+
+\subsubsection{Disabling selinux with SysFS}
+\begin{lstlisting}[numbers=left]
+
+$ cat / sys/ fs/ selinux/ enforce
+1
+$ echo 0 > / sys/ fs / selinux/ enforce
+$ cat / sys/ fs/ selinux/ enforce
+0
+$ echo 1 > / sys/ fs / selinux/ enforce
+$ cat / sys/ fs/ selinux/ enforce
+1
+\end{lstlisting}
+
+\par As we know, user has no authority to create arbitrary files in SysFS. Instead, only a certain kind of reference counted kernel structure known as a kobject can be added to this file system. kobjects added to the SysFS file system are organized in a tree hierarchy. Each kobject exposed to SysFS should have a parent kobject, a name, and a series of attributes. The kobject is exposed as a directory, and its attributes are exposed as files. As a consequence, each kobject and attribute’s name must be unique among its siblings since it is being exposed as a file name. In the example above, the selinux object had an attribute named enforce. Its parent was the fs object.
+
+\par Each kobject attribute has a “show” function, which displays information about the kobject, and optionally a “store” function, which updates information in the kobject. Whenever an attribute is read from using the read system call, the function fills a provided buffer with a human readable ASCII representation of its value. Similarly, when an attribute is written to using the write system call, it unmarshals the human readable data in the buffer into a machine readable value, and then updates its value. Since they are represented as files, attributes have permissions indicating whether they can be read from or written to by various users. Files and directories under SysFS are regarded as owned by the root user.
+
+\par kobjects with many attributes should have an attribute group structure. Large groups of kobjects can be encapsulated in a special type of object known as a kset. Like normal kobjects, ksets are represented as directories and have parents, however they do not have attributes.
+
+\section{Install CentOS 7 64-bit}
+    (Not yet)
+\section{Install 4.1.5 linux kernel}
+	(Not yet)
+\section{Test result}
+	(Not yet)
+\section{Conclusion}
+	(Not yet)
+    
+% References
+\newpage
+\begin{thebibliography}{6}
+
+\bibitem{1}
+Intel. \textit{Virtualization Technology Specification for the IA-32 Intel Architecture}. Intel. Apr, 2005. [online] Available at:  http://dforeman.cs.binghamton.edu/~foreman/550pages/Readings/intel05virtualization.pdf. [Accessed 22 May. 2018].
+
+\bibitem{2}
+Ian Kronquist. \textit{Implementing a Linux Sysfs Interface to the VMCS}. Oregon State University. 2017. [online] Available at: https://ir.library.oregonstate.edu/concern/honors\_college\_theses/rb68xd807. [Accessed 22 May. 2018].
+
+\bibitem{3}
+Andries Brouwer. (2003). \textit{The Linux kernel: Sysfs and kobjects.} [online] Available at: https://www.win.tue.nl/~aeb/linux/lk/lk-13.html [Accessed 25 May 2018].
+
+\bibitem{4}
+Wowo (2014). \textit{Linux\_Kobject}. [online] Available at: http://www.wowotech.net/linux\_kenrel/kobject.html [Accessed 25 May 2018]
+
+\bibitem{5}
+Kroah-Hartman, G. (2018). \textit{Everything you never wanted to know about kobjects, ksets, and ktypes}. [online] Kernel.org. Available at: https://www.kernel.org/doc/Documentation/kobject.txt [Accessed 25 May 2018].
+\end{thebibliography}
+
+\end{document}
