@@ -1,2 +1,1 @@
-# CS544_OS2
-2018 Spring
+# CS544_OS2 (2018 Spring)
